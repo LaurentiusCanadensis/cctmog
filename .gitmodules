@@ -1,0 +1,6 @@
+[submodule "vendor/svg-cards"]
+	path = vendor/svg-cards
+	url = https://github.com/htdebeer/SVG-cards.git
+[submodule "vendor/svg-cards2"]
+	path = vendor/svg-cards2
+	url = https://github.com/younestouati/playing-cards-standard-deck.git

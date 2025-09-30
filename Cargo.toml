@@ -1,0 +1,31 @@
+
+[workspace]
+members = ["protocol", "server", "client"]
+resolver = "2"
+
+[package]
+name = "cctmog-combined"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "cctmog-combined"
+path = "src/main.rs"
+
+[[bin]]
+name = "cli_client"
+path = "cli_client.rs"
+
+[[bin]]
+name = "demo_cli"
+path = "demo_cli_client.rs"
+
+[dependencies]
+# CLI argument parsing
+clap = { version = "4.0", features = ["derive"] }
+# CLI client dependencies
+tokio = { version = "1.39", features = ["full"] }
+tokio-tungstenite = "0.23"
+futures-util = "0.3"
+serde_json = "1"
+cctmog-protocol = { path = "protocol" }
