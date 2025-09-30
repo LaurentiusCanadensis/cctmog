@@ -1,0 +1,175 @@
+===============================================================================
+ Language            Files        Lines         Code     Comments       Blanks
+===============================================================================
+ JavaScript              1           32           27            0            5
+-------------------------------------------------------------------------------
+ |/svg-cards2/gruntfile.js           32           27            0            5
+-------------------------------------------------------------------------------
+ JSON                    2           33           33            0            0
+-------------------------------------------------------------------------------
+ |/svg-cards2/package.json           32           32            0            0
+ |g-cards2/dist/cards.json            1            1            0            0
+-------------------------------------------------------------------------------
+ Shell                   1           46           24           12           10
+-------------------------------------------------------------------------------
+ ./start_cctmog.sh                   46           24           12           10
+-------------------------------------------------------------------------------
+ SVG                    53           56           56            0            0
+-------------------------------------------------------------------------------
+ ./client/cards/3c.svg                1            1            0            0
+ ./client/cards/2s.svg                1            1            0            0
+ ./client/cards/1h.svg                1            1            0            0
+ ./client/cards/2d.svg                1            1            0            0
+ ./client/cards/10h.svg               1            1            0            0
+ ./client/cards/joker.svg             4            4            0            0
+ ./client/cards/3s.svg                1            1            0            0
+ ./client/cards/3d.svg                1            1            0            0
+ ./client/cards/13c.svg               1            1            0            0
+ ./client/cards/2c.svg                1            1            0            0
+ ./client/cards/9c.svg                1            1            0            0
+ ./client/cards/11h.svg               1            1            0            0
+ ./client/cards/7h.svg                1            1            0            0
+ ./client/cards/4s.svg                1            1            0            0
+ ./client/cards/4d.svg                1            1            0            0
+ ./client/cards/13d.svg               1            1            0            0
+ ./client/cards/8s.svg                1            1            0            0
+ ./client/cards/8d.svg                1            1            0            0
+ ./client/cards/5c.svg                1            1            0            0
+ ./client/cards/4c.svg                1            1            0            0
+ ./client/cards/9s.svg                1            1            0            0
+ ./client/cards/6h.svg                1            1            0            0
+ ./client/cards/5s.svg                1            1            0            0
+ ./client/cards/9d.svg                1            1            0            0
+ ./client/cards/5d.svg                1            1            0            0
+ ./client/cards/6d.svg                1            1            0            0
+ ./client/cards/8c.svg                1            1            0            0
+ ./client/cards/12d.svg               1            1            0            0
+ ./client/cards/6s.svg                1            1            0            0
+ ./client/cards/5h.svg                1            1            0            0
+ ./client/cards/7c.svg                1            1            0            0
+ ./client/cards/8h.svg                1            1            0            0
+ ./client/cards/9h.svg                1            1            0            0
+ ./client/cards/7d.svg                1            1            0            0
+ ./client/cards/6c.svg                1            1            0            0
+ ./client/cards/12s.svg               1            1            0            0
+ ./client/cards/4h.svg                1            1            0            0
+ ./client/cards/12c.svg               1            1            0            0
+ ./client/cards/13s.svg               1            1            0            0
+ ./client/cards/1c.svg                1            1            0            0
+ ./client/cards/7s.svg                1            1            0            0
+ ./client/cards/10s.svg               1            1            0            0
+ ./client/cards/1d.svg                1            1            0            0
+ ./client/cards/10d.svg               1            1            0            0
+ ./client/cards/1s.svg                1            1            0            0
+ ./client/cards/3h.svg                1            1            0            0
+ ./client/cards/10c.svg               1            1            0            0
+ ./client/cards/11c.svg               1            1            0            0
+ ./client/cards/2h.svg                1            1            0            0
+ ./client/cards/13h.svg               1            1            0            0
+ ./client/cards/11d.svg               1            1            0            0
+ ./client/cards/12h.svg               1            1            0            0
+ ./client/cards/11s.svg               1            1            0            0
+-------------------------------------------------------------------------------
+ TOML                    4           91           76            3           12
+-------------------------------------------------------------------------------
+ ./client/Cargo.toml                 25           23            1            1
+ ./protocol/Cargo.toml               11            9            0            2
+ ./server/Cargo.toml                 24           21            0            3
+ ./Cargo.toml                        31           23            2            6
+-------------------------------------------------------------------------------
+ Markdown                2           63            0           43           20
+ |- BASH                 1            7            6            1            0
+ (Total)                             70            6           44           20
+-------------------------------------------------------------------------------
+ |dor/svg-cards2/README.md           46            0           31           15
+-- ./README.md ----------------------------------------------------------------
+ |- Markdown                         17            0           12            5
+ |- BASH                              7            6            1            0
+ ./README.md                         17            0           12            5
+-------------------------------------------------------------------------------
+ Rust                   49        11887        10142          505         1240
+ |- Markdown            10           74            0           74            0
+ (Total)                          11961        10142          579         1240
+-------------------------------------------------------------------------------
+ ./client/src/ws.rs                   6            5            0            1
+ |es/seven_twenty_seven.rs          145          130            0           15
+ |lient/src/games/omaha.rs          225          205            3           17
+ ./client/src/messages.rs            94           60           16           18
+ ./server/src/messages.rs           129          102            8           19
+ |rc/games/texas_holdem.rs          250          228            3           19
+ ./client/src/main.rs               717          621           28           68
+ ./client/src/types.rs                1            0            0            1
+ ./cli_client.rs                    208          178            5           25
+ |tates/connect_overlay.rs           43           38            2            3
+ |ent/src/states/splash.rs           28           26            0            2
+ |t/src/states/comments.rs           33           31            0            2
+ ./server/src/main.rs              1766         1456          118          192
+ |client/src/states/mod.rs           28           27            0            1
+ |c/states/table_choice.rs           33           31            0            2
+ ./demo_cli_client.rs               180          151            9           20
+ |ates/dealer_selection.rs          137          124            3           10
+ |/states/table_browser.rs           25           23            0            2
+ |lient/src/states/game.rs           74           68            3            3
+ |ent/src/states/lounge.rs          303          270           11           22
+ |src/states/name_input.rs           37           34            1            2
+ |states/table_creation.rs           89           79            1            9
+ |states/game_selection.rs          209          192            5           12
+ |/states/dealer_splash.rs           44           42            0            2
+ |client/src/ui/widgets.rs            9            8            0            1
+ ./client/src/app.rs               1618         1409           86          123
+ ./client/src/ui/logo.rs             11            9            1            1
+ ./client/src/ui/shared.rs          103           92            2            9
+ |t/src/embedded_server.rs          245          200           15           30
+ ./client/src/ui/ws.rs               40           37            0            3
+ ./client/src/ui/state.rs            67           57            0           10
+ ./client/src/ui/theme.rs            19           17            0            2
+ |src/ui/player_options.rs          157          146            2            9
+ ./client/src/ui/action.rs            0            0            0            0
+ |ent/src/ui/game_table.rs          318          291            0           27
+ ./client/src/ui/views.rs           597          541           15           41
+ ./client/src/ui/header.rs           65           60            0            5
+ ./client/src/ui/mod.rs              47           40            2            5
+ ./client/src/ui/cards.rs            82           71            4            7
+-- ./client/src/games/mod.rs --------------------------------------------------
+ |- Rust                             30           22            0            8
+ |- Markdown                          8            0            8            0
+ ./client/src/games/mod.rs           30           22            0            8
+-- ./src/main.rs --------------------------------------------------------------
+ |- Rust                            151          125            7           19
+ |- Markdown                          8            0            8            0
+ ./src/main.rs                      151          125            7           19
+-- ./protocol/src/lib.rs ------------------------------------------------------
+ |- Rust                            475          421           16           38
+ |- Markdown                         15            0           15            0
+ ./protocol/src/lib.rs              475          421           16           38
+-- ./server/src/game.rs -------------------------------------------------------
+ |- Rust                            381          325            9           47
+ |- Markdown                          5            0            5            0
+ ./server/src/game.rs               381          325            9           47
+-- ./server/src/persistence.rs ------------------------------------------------
+ |- Rust                            303          255           16           32
+ |- Markdown                          5            0            5            0
+ ./server/src/persistence.rs          303          255           16           32
+-- ./client/src/ui/table.rs ---------------------------------------------------
+ |- Rust                             37           32            1            4
+ |- Markdown                          2            0            2            0
+ ./client/src/ui/table.rs            37           32            1            4
+-- ./client/src/ui/canvas.rs --------------------------------------------------
+ |- Rust                            148          124            5           19
+ |- Markdown                          1            0            1            0
+ ./client/src/ui/canvas.rs          148          124            5           19
+-- ./client/src/game.rs -------------------------------------------------------
+ |- Rust                            381          325            9           47
+ |- Markdown                          5            0            5            0
+ ./client/src/game.rs               381          325            9           47
+-- ./client/src/ui/actions.rs -------------------------------------------------
+ |- Rust                            122          114            0            8
+ |- Markdown                          1            0            1            0
+ ./client/src/ui/actions.rs          122          114            0            8
+-- ./server/src/tests.rs ------------------------------------------------------
+ |- Rust                           1677         1300           99          278
+ |- Markdown                         24            0           24            0
+ ./server/src/tests.rs             1677         1300           99          278
+===============================================================================
+ Total                 112        12208        10358          563         1287
+===============================================================================
