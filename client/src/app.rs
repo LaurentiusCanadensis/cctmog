@@ -40,7 +40,7 @@ pub struct App {
     pub auto_started: bool,
 
     // Chat state
-    pub chat_messages: Vec<(String, String, MessageScope)>, // (player_name, message, scope)
+    pub chat_messages: Vec<(String, String, MessageScope, String)>, // (player_name, message, scope, timestamp)
     pub chat_input: String,
     pub chat_scope: MessageScope,
 
@@ -82,16 +82,35 @@ pub struct App {
     pub is_hosting: bool,
     pub host_name: Option<String>,
     pub host_server_port: Option<u16>,
+    pub host_input: String, // Manual host entry field
     pub waiting_for_players: bool,
+
+    // Lounge state
+    pub in_lounge: bool,
+    pub lounge_players: Vec<String>,
+    pub available_hosts: Vec<(String, u16)>, // (player_name, port)
+
+    // Username selection dropdown
+    pub available_usernames: Vec<String>,
+    pub selected_username: Option<String>,
 }
 
 impl Default for App {
     fn default() -> Self {
+        // Available usernames for dropdown selection
+        let available_usernames = vec![
+            "Joe".to_string(),
+            "Frank".to_string(),
+            "Lor".to_string(),
+            "Mass".to_string(),
+            "Huge".to_string()
+        ];
+
         Self {
             app_state: AppState::Splash,
             splash_start_time: Some(std::time::Instant::now()),
             url: "ws://127.0.0.1:9001/ws".into(),
-            name: "".into(),
+            name: String::new(), // Will be set when user selects from dropdown
             room: "room-1".into(),
             connecting: false,
             connected: false,
@@ -140,7 +159,17 @@ impl Default for App {
             is_hosting: false,
             host_name: None,
             host_server_port: None,
+            host_input: String::new(),
             waiting_for_players: false,
+
+            // Lounge defaults
+            in_lounge: false,
+            lounge_players: Vec::new(),
+            available_hosts: Vec::new(),
+
+            // Username selection fields
+            available_usernames: available_usernames,
+            selected_username: None,
         }
     }
 }
@@ -156,9 +185,17 @@ impl App {
                         self.host_name = Some(name.to_string());
                         self.host_server_port = Some(port);
                         self.log(format!("🔍 Found host: {} on port {}", name, port));
+                    } else {
+                        self.log(format!("✓ Already connected to host: {} on port {}", name, port));
                     }
+                } else {
+                    self.log("⚠️ Invalid port in host file".to_string());
                 }
+            } else {
+                self.log("⚠️ Invalid format in host file".to_string());
             }
+        } else {
+            self.log("🔍 No host available - no host file found".to_string());
         }
     }
 
@@ -288,6 +325,11 @@ impl App {
                 self.name = s;
                 self.name_error = None;
             }
+            Msg::UsernameSelected(username) => {
+                self.selected_username = Some(username.clone());
+                self.name = username;
+                self.name_error = None;
+            }
             Msg::RoomChanged(s) => self.room = s,
 
             Msg::ConnectToggle => {
@@ -308,12 +350,23 @@ impl App {
 
                 // Only auto-join if we're in a connecting state that expects to join a room
                 if self.app_state == AppState::ConnectOverlay {
-                    println!("🎮 Auto-joining game room: {}", self.room);
-                    self.send(ClientToServer::Join {
-                        room: self.room.clone(),
-                        name: self.name.clone(),
-                    });
-                    self.log(format!("🎮 Joining game room: {}", self.room));
+                    if self.in_lounge && self.room == "lounge" {
+                        // Join lounge instead of regular game room
+                        println!("🚪 Auto-joining lounge");
+                        self.send(ClientToServer::JoinLounge {
+                            name: self.name.clone(),
+                        });
+                        self.log("🚪 Joining lounge");
+                        self.app_state = AppState::Lounge; // Go back to lounge state
+                    } else {
+                        // Regular game room join
+                        println!("🎮 Auto-joining game room: {}", self.room);
+                        self.send(ClientToServer::Join {
+                            room: self.room.clone(),
+                            name: self.name.clone(),
+                        });
+                        self.log(format!("🎮 Joining game room: {}", self.room));
+                    }
                 }
 
                 // Handle different states after WebSocket connection
@@ -391,8 +444,8 @@ impl App {
                 ServerToClient::Showdown { .. } => self.log("showdown"),
                 ServerToClient::Error { message } => self.log(format!("server error: {message}")),
                 ServerToClient::Info { message } => self.log(format!("info: {message}")),
-                ServerToClient::ChatMessage { player_name, message, scope, room: _, timestamp: _, recipient: _ } => {
-                    self.chat_messages.push((player_name, message, scope));
+                ServerToClient::ChatMessage { player_name, message, scope, room: _, timestamp, recipient: _ } => {
+                    self.chat_messages.push((player_name, message, scope, timestamp));
                 }
                 ServerToClient::TableList { tables } => {
                     self.available_tables = tables;
@@ -412,6 +465,26 @@ impl App {
                 }
                 ServerToClient::GameComment { comment } => {
                     self.game_comments.push(comment);
+                }
+                ServerToClient::LoungeUpdate { players, available_hosts } => {
+                    println!("📫 Received LoungeUpdate with {} players: {:?}", players.len(), players);
+                    println!("📫 Available hosts: {:?}", available_hosts);
+                    println!("📫 Current state: {:?}, transitioning to Lounge", self.app_state);
+
+                    // Clear chat messages on first LoungeUpdate after joining (to prepare for history)
+                    // This prevents duplicates from multiple reconnections
+                    if self.app_state != AppState::Lounge {
+                        self.chat_messages.clear();
+                    }
+
+                    self.lounge_players = players.clone();
+                    self.available_hosts = available_hosts;
+                    self.in_lounge = true;
+                    self.connected = true;
+                    self.connecting = false;
+                    self.app_state = AppState::Lounge;
+                    println!("📫 New state: {:?}, players: {:?}", self.app_state, self.lounge_players);
+                    self.log(format!("📫 Lounge update: {} players, {} hosts available", self.lounge_players.len(), self.available_hosts.len()));
                 }
             },
 
@@ -437,19 +510,7 @@ impl App {
             Msg::Call    => self.send(ClientToServer::Call),
             Msg::Raise   => self.send(ClientToServer::Raise),
 
-            // Chat messages
-            Msg::ChatInputChanged(input) => {
-                self.chat_input = input;
-            }
-            Msg::SendChat => {
-                if !self.chat_input.trim().is_empty() {
-                    self.send(ClientToServer::Chat {
-                        message: self.chat_input.clone(),
-                        scope: self.chat_scope
-                    });
-                    self.chat_input.clear();
-                }
-            }
+            // Chat messages - handled by new system below
 
             // Join specific table
             Msg::JoinTableByName(table_name) => {
@@ -485,7 +546,13 @@ impl App {
                     self.name_error = Some("Name can only contain letters, numbers, _ and -".to_string());
                 } else {
                     self.name_error = None;
-                    self.app_state = AppState::Lounge;
+                    // Auto-connect to the lounge after name confirmation
+                    self.url = "ws://127.0.0.1:9001/ws".to_string();
+                    self.room = "lounge".to_string();
+                    self.in_lounge = true;
+                    self.app_state = AppState::ConnectOverlay;
+                    self.connecting = true;
+                    self.log("🚪 Joining lounge...".to_string());
                 }
             }
 
@@ -784,6 +851,39 @@ impl App {
                     self.app_state = AppState::Game;
                 }
             }
+
+            // Handle lounge messages
+            Msg::JoinLounge | Msg::LeaveLounge => {
+                if self.app_state == AppState::Lounge {
+                    return self.handle_lounge_msg(&msg);
+                }
+            }
+
+            // Chat messages in lounge
+            Msg::ChatInputChanged(ref input) => {
+                if self.app_state == AppState::Lounge && self.in_lounge {
+                    return self.handle_lounge_msg(&msg);
+                } else {
+                    self.chat_input = input.clone();
+                }
+            }
+
+            Msg::SendChat => {
+                if self.app_state == AppState::Lounge && self.in_lounge {
+                    return self.handle_lounge_msg(&msg);
+                } else if !self.chat_input.trim().is_empty() {
+                    self.send(ClientToServer::Chat {
+                        message: self.chat_input.clone(),
+                        scope: self.chat_scope
+                    });
+                    self.chat_input.clear();
+                }
+            }
+
+            // Host selection messages
+            Msg::HostInputChanged(_) | Msg::ConnectToHost | Msg::VolunteerToHost | Msg::SelectHost(_, _) => {
+                return self.handle_lounge_msg(&msg);
+            }
         }
         Task::none()
     }
@@ -812,7 +912,7 @@ impl App {
 
     pub fn subscription(&self) -> Subscription<Msg> {
         let tick = iced::time::every(Duration::from_millis(400)).map(|_| Msg::Tick);
-        let ws_sub = if (self.app_state == AppState::ConnectOverlay || self.app_state == AppState::Game || self.app_state == AppState::Comments) && (self.connecting || self.connected) && !self.name.trim().is_empty() {
+        let ws_sub = if (self.app_state == AppState::ConnectOverlay || self.app_state == AppState::Lounge || self.app_state == AppState::Game || self.app_state == AppState::Comments) && (self.connecting || self.connected) && !self.name.trim().is_empty() {
             subscription(self.url.clone(), self.room.clone(), self.name.clone())
         } else {
             Subscription::none()
@@ -827,7 +927,12 @@ impl App {
 
         let main_content = match self.app_state {
             AppState::Splash => splash_view(),
-            AppState::NameInput => name_input_view(&self.name, &self.name_error),
+            AppState::NameInput => name_input_view(
+                &self.name,
+                &self.name_error,
+                &self.available_usernames,
+                &self.selected_username
+            ),
             AppState::Lounge => self.lounge_view(),
             AppState::TableChoice => table_choice_view(self),
             AppState::TableCreation => table_creation_view(self),
@@ -1485,7 +1590,7 @@ impl App {
             "No messages yet".to_string()
         } else {
             self.chat_messages.iter()
-                .map(|(name, msg, scope)| {
+                .map(|(name, msg, scope, _timestamp)| {
                     let scope_prefix = match scope {
                         MessageScope::Match => "[Match]",
                         MessageScope::Group => "[Group]",

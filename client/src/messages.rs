@@ -87,8 +87,19 @@ pub enum Msg {
 
     // Host discovery
     CheckForHost,
+    HostInputChanged(String),
+    ConnectToHost,
+    VolunteerToHost,
+    SelectHost(String, u16), // (player_name, port)
 
     // Host game controls
     StartGameNow,
     WaitForMorePlayers,
+
+    // Lounge messages
+    JoinLounge,
+    LeaveLounge,
+
+    // Username selection dropdown
+    UsernameSelected(String),
 }

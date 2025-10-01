@@ -75,7 +75,7 @@ fn run_both(clients: u32, port: u16) {
         println!("🎮 Starting client {}...", i);
         let handle = thread::spawn(move || {
             thread::sleep(Duration::from_millis(500 * i as u64)); // Stagger client starts
-            run_client();
+            run_client_with_index(i);
         });
         client_handles.push(handle);
     }
@@ -123,7 +123,7 @@ fn run_clients_only(clients: u32) {
         println!("🎮 Starting client {}...", i);
         let handle = thread::spawn(move || {
             thread::sleep(Duration::from_millis(500 * i as u64)); // Stagger client starts
-            run_client();
+            run_client_with_index(i);
         });
         client_handles.push(handle);
     }
@@ -139,6 +139,29 @@ fn run_clients_only(clients: u32) {
 fn run_client() {
     let status = Command::new("cargo")
         .args(&["run", "-p", "cctmog"])
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status();
+
+    match status {
+        Ok(exit_status) => {
+            if !exit_status.success() {
+                eprintln!("❌ Client exited with error: {}", exit_status);
+                std::process::exit(1);
+            }
+        }
+        Err(e) => {
+            eprintln!("❌ Failed to start client: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_client_with_index(index: u32) {
+    let status = Command::new("cargo")
+        .args(&["run", "-p", "cctmog"])
+        .env("CLIENT_INDEX", index.to_string())
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())

@@ -1,12 +1,14 @@
 use cctmog_protocol::{StoredMessage, MessageScope};
 use std::path::Path;
 use std::fs;
-use std::io::{self, Write, BufReader, BufRead};
+use std::io::{self, BufRead};
 use serde_json;
 use tokio::fs as async_fs;
+use zeromq::{Socket, SocketSend, ZmqMessage};
 
 pub struct MessageStore {
     data_dir: String,
+    zmq_publisher: Option<std::sync::Arc<tokio::sync::Mutex<zeromq::PubSocket>>>,
 }
 
 impl MessageStore {
@@ -14,6 +16,30 @@ impl MessageStore {
         fs::create_dir_all(data_dir)?;
         Ok(MessageStore {
             data_dir: data_dir.to_string(),
+            zmq_publisher: None,
+        })
+    }
+
+    pub async fn new_with_zmq(data_dir: &str, zmq_port: u16) -> io::Result<Self> {
+        fs::create_dir_all(data_dir)?;
+
+        // Initialize ZMQ publisher
+        let mut publisher = zeromq::PubSocket::new();
+        let zmq_addr = format!("tcp://127.0.0.1:{}", zmq_port);
+
+        if let Err(e) = publisher.bind(&zmq_addr).await {
+            eprintln!("Failed to bind ZMQ publisher to {}: {}", zmq_addr, e);
+            return Ok(MessageStore {
+                data_dir: data_dir.to_string(),
+                zmq_publisher: None,
+            });
+        }
+
+        println!("📡 ZMQ publisher bound to {}", zmq_addr);
+
+        Ok(MessageStore {
+            data_dir: data_dir.to_string(),
+            zmq_publisher: Some(std::sync::Arc::new(tokio::sync::Mutex::new(publisher))),
         })
     }
 
@@ -30,13 +56,34 @@ impl MessageStore {
             io::Error::new(io::ErrorKind::InvalidData, e)
         })?);
 
-        async_fs::write(&file_path,
-            if Path::new(&file_path).exists() {
-                format!("{}{}", async_fs::read_to_string(&file_path).await.unwrap_or_default(), json_line)
-            } else {
-                json_line
+        let content_to_write = if Path::new(&file_path).exists() {
+            format!("{}{}", async_fs::read_to_string(&file_path).await.unwrap_or_default(), json_line)
+        } else {
+            json_line.clone()
+        };
+
+        async_fs::write(&file_path, content_to_write).await?;
+
+        // Publish message via ZMQ if publisher is available
+        if let Some(ref publisher_mutex) = self.zmq_publisher {
+            let topic = format!("chat.{}", match &message.scope {
+                MessageScope::Global => "global".to_string(),
+                MessageScope::Match => message.room.as_ref().unwrap_or(&"unknown".to_string()).clone(),
+                MessageScope::Group => "group".to_string(),
+                MessageScope::Private => format!("private.{}", message.recipient.unwrap_or_default()),
+            });
+
+            let zmq_message = ZmqMessage::try_from(format!("{} {}", topic, json_line.trim()))
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("ZMQ message error: {}", e)))?;
+
+            // Try to send, but don't fail if ZMQ send fails (fallback to file only)
+            let mut publisher = publisher_mutex.lock().await;
+            if let Err(e) = publisher.send(zmq_message).await {
+                eprintln!("Failed to publish message via ZMQ: {}", e);
             }
-        ).await
+        }
+
+        Ok(())
     }
 
     pub async fn get_messages(&self, scope: MessageScope, room: Option<&str>, recipient: Option<uuid::Uuid>, limit: Option<usize>) -> io::Result<Vec<StoredMessage>> {

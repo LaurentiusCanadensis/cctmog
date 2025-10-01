@@ -32,6 +32,6 @@ impl App {
     }
 
     pub fn name_input_view(&self) -> Element<'_, Msg> {
-        crate::ui::views::name_input_view(&self.name, &self.name_error)
+        crate::ui::views::name_input_view(&self.name, &self.name_error, &self.available_usernames, &self.selected_username)
     }
 }

@@ -12,7 +12,12 @@ pub fn subscription(url: String, room: String, name: String) -> Subscription<Msg
                 let (tx_out, mut rx_out) = mpsc::unbounded::<ClientToServer>();
                 let _ = output.send(Msg::WsConnected(tx_out.clone())).await;
 
-                let join = ClientToServer::Join { room: room.clone(), name: name.clone() };
+                // Send appropriate join message based on room type
+                let join = if room == "lounge" {
+                    ClientToServer::JoinLounge { name: name.clone() }
+                } else {
+                    ClientToServer::Join { room: room.clone(), name: name.clone() }
+                };
                 let _ = ws.send(Message::Text(serde_json::to_string(&join).unwrap())).await;
 
                 loop {

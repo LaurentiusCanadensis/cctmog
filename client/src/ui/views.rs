@@ -27,14 +27,29 @@ pub fn splash_view() -> Element<'static, Msg> {
     .into()
 }
 
-pub fn name_input_view<'a>(name: &'a str, name_error: &'a Option<String>) -> Element<'a, Msg> {
+pub fn name_input_view<'a>(
+    name: &'a str,
+    name_error: &'a Option<String>,
+    available_usernames: &'a [String],
+    selected_username: &'a Option<String>
+) -> Element<'a, Msg> {
     let mut content = column![
         Space::with_height(Length::Fixed(100.0)),
         brand_logo(),
         Space::with_height(Length::Fixed(50.0)),
-        text("Enter Your Name").size(24),
+        text("Select Your Username").size(24),
         Space::with_height(Length::Fixed(20.0)),
-        text_input("Your name", name)
+        pick_list(
+            available_usernames,
+            selected_username.as_ref(),
+            Msg::UsernameSelected
+        )
+        .width(Length::Fixed(300.0))
+        .padding(10),
+        Space::with_height(Length::Fixed(10.0)),
+        text("Or enter a custom name:").size(16),
+        Space::with_height(Length::Fixed(10.0)),
+        text_input("Custom name", name)
             .on_input(Msg::NameChanged)
             .padding(10)
             .width(Length::Fixed(300.0)),

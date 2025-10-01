@@ -414,6 +414,11 @@ pub enum ClientToServer {
     // Comments phase
     PostComment { message: String },
     ContinueToNextGame,
+
+    // Lounge system
+    JoinLounge { name: String },
+    LeaveLounge,
+    VolunteerToHost { port: u16 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -468,6 +473,12 @@ pub enum ServerToClient {
     },
     GameComment {
         comment: GameComment,
+    },
+
+    // Lounge updates
+    LoungeUpdate {
+        players: Vec<String>,
+        available_hosts: Vec<(String, u16)>, // (player_name, port)
     },
 }
 

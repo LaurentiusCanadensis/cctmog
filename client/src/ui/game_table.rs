@@ -9,12 +9,11 @@ use crate::ui::cards::{face_down_cards_row, cards_row_svg, CardSize};
 
 fn player_avatar(name: &str, is_to_act: bool) -> Element<'static, Msg> {
     let avatar_color = match name.chars().next().unwrap_or('A') {
-        'J' => iced::Color::from_rgb(0.2, 0.8, 0.4), // Green for John
+        'J' => iced::Color::from_rgb(0.2, 0.8, 0.4), // Green for Joe
         'F' => iced::Color::from_rgb(0.8, 0.3, 0.2), // Red for Frank
-        'S' => iced::Color::from_rgb(0.3, 0.5, 0.9), // Blue for Santo
-        'M' => iced::Color::from_rgb(0.9, 0.7, 0.2), // Yellow for Mass
-        'D' => iced::Color::from_rgb(0.8, 0.2, 0.8), // Purple for Dan
         'L' => iced::Color::from_rgb(0.2, 0.8, 0.8), // Cyan for Lor
+        'M' => iced::Color::from_rgb(0.9, 0.7, 0.2), // Yellow for Mass
+        'H' => iced::Color::from_rgb(0.8, 0.2, 0.8), // Purple for Huge
         _ => iced::Color::from_rgb(0.6, 0.6, 0.6), // Default gray
     };
 

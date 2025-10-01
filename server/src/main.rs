@@ -29,22 +29,47 @@ const DEALER_MUST_START: bool = false; // only dealer can press "Start hand"
 const MAX_PLAYERS: usize = 7; // maximum players per table
 
 #[derive(Clone)]
+struct LoungeState {
+    players: HashMap<Uuid, LoungePlayer>,
+}
+
+#[derive(Clone)]
+struct LoungePlayer {
+    id: Uuid,
+    name: String,
+    tx: mpsc::UnboundedSender<ServerToClient>,
+    history_sent: bool, // Track if we've already sent chat history to this player
+    hosting_port: Option<u16>, // Port if volunteering to host
+}
+
+#[derive(Clone)]
 struct AppState {
     inner: Arc<Mutex<Rooms>>,
     message_store: Arc<MessageStore>,
     distributed_tables: Arc<Mutex<HashMap<String, cctmog_protocol::TableInfo>>>,
+    lounge: Arc<Mutex<LoungeState>>,
 }
 type Rooms = HashMap<String, game::Room>;
 
 #[tokio::main]
 async fn main() {
-    // Initialize message store
-    let message_store = Arc::new(MessageStore::new("./message_data").unwrap());
+    // Initialize message store with ZMQ support
+    let message_store = Arc::new(
+        MessageStore::new_with_zmq("./message_data", 5555)
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("Failed to initialize ZMQ message store: {}, falling back to file-only", e);
+                MessageStore::new("./message_data").unwrap()
+            })
+    );
 
     let state = AppState {
         inner: Arc::new(Mutex::new(HashMap::new())),
         message_store,
         distributed_tables: Arc::new(Mutex::new(HashMap::new())),
+        lounge: Arc::new(Mutex::new(LoungeState {
+            players: HashMap::new(),
+        })),
     };
     let app = Router::new()
         .route("/ws", get(ws_handler))
@@ -92,8 +117,14 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
             }
             Message::Close(_) => {
                 if let Some(room) = &joined_room {
-                    remove_player(&state, room, my_id);
-                    remove_spectator(&state, room, my_id);
+                    if room == "lounge" {
+                        // Handle lounge disconnect
+                        handle_leave_lounge(state.clone(), my_id).await;
+                    } else {
+                        // Handle match room disconnect
+                        remove_player(&state, room, my_id);
+                        remove_spectator(&state, room, my_id);
+                    }
                 }
                 break;
             }
@@ -514,6 +545,17 @@ async fn route_cmd(
         ClientToServer::RegisterTable { name, game_variant, ante, limit_small, limit_big, max_raises, server_port, player_count } => {
             handle_register_table(state.clone(), name, game_variant, ante, limit_small, limit_big, max_raises, server_port, player_count).await;
         }
+        ClientToServer::JoinLounge { name } => {
+            handle_join_lounge(state.clone(), my_id, name, tx_out.clone()).await;
+            *joined_room = Some("lounge".to_string());
+        }
+        ClientToServer::LeaveLounge => {
+            handle_leave_lounge(state.clone(), my_id).await;
+            *joined_room = None;
+        }
+        ClientToServer::VolunteerToHost { port } => {
+            handle_volunteer_to_host(state.clone(), my_id, port).await;
+        }
     }
 }
 
@@ -526,6 +568,14 @@ fn with_room<F: FnOnce(&mut game::Room)>(state: &AppState, room: &str, f: F) {
 
 async fn handle_chat_message(state: AppState, player_id: Uuid, joined_room: Option<String>, message: String, scope: MessageScope) {
     use chrono::Utc;
+
+    // Check if this is a lounge message
+    if let Some(room_name) = &joined_room {
+        if room_name == "lounge" {
+            handle_lounge_chat(state, player_id, message).await;
+            return;
+        }
+    }
 
     // Get player name and determine room context
     let (player_name, room_name) = match scope {
@@ -1764,3 +1814,192 @@ async fn handle_list_tables(state: AppState, tx_out: &tokio::sync::mpsc::Unbound
     let _ = tx_out.send(cctmog_protocol::ServerToClient::TableList { tables });
     println!("[LIST] Sent {} tables to client", table_count);
 }
+
+async fn handle_join_lounge(state: AppState, player_id: Uuid, name: String, tx_out: mpsc::UnboundedSender<ServerToClient>) {
+    eprintln!("[LOUNGE] {} (id={}) joining lounge", name, player_id);
+
+    let send_history: bool;
+
+    {
+        let mut lounge = state.lounge.lock();
+
+        // Check if this player_id is already in the lounge
+        if let Some(existing) = lounge.players.get_mut(&player_id) {
+            // Update the tx channel (reconnection case)
+            eprintln!("[LOUNGE] {} (id={}) reconnecting, updating tx channel", name, player_id);
+            existing.tx = tx_out.clone();
+            existing.name = name.clone();
+            // Don't send history again if already sent
+            send_history = !existing.history_sent;
+            if send_history {
+                existing.history_sent = true;
+            }
+        } else {
+            // Check for duplicate names from OTHER players
+            let name_exists = lounge.players.values().any(|p| p.id != player_id && p.name == name);
+            if name_exists {
+                let error_msg = ServerToClient::Error {
+                    message: format!("Name '{}' is already taken. Please choose a different name.", name),
+                };
+                let _ = tx_out.send(error_msg);
+                eprintln!("[LOUNGE] Rejected {} (id={}) - name already taken by another player", name, player_id);
+                return;
+            }
+
+            // Add new player to lounge
+            lounge.players.insert(player_id, LoungePlayer {
+                id: player_id,
+                name: name.clone(),
+                tx: tx_out.clone(),
+                history_sent: false, // Will send history below
+                hosting_port: None,
+            });
+            send_history = true;
+        }
+    } // Lock released here
+
+    // Send chat history to the joining player (last 50 messages) - only once
+    if send_history {
+        if let Ok(history) = state.message_store.get_messages(MessageScope::Group, None, None, Some(50)).await {
+            eprintln!("[LOUNGE] Sending {} chat history messages to {}", history.len(), name);
+            for stored_msg in history.iter().rev() { // Reverse to send oldest first
+                let chat_msg = ServerToClient::ChatMessage {
+                    player_name: stored_msg.player_name.clone(),
+                    message: stored_msg.message.clone(),
+                    scope: stored_msg.scope,
+                    room: stored_msg.room.clone(),
+                    timestamp: stored_msg.timestamp.clone(),
+                    recipient: stored_msg.recipient,
+                };
+                let _ = tx_out.send(chat_msg);
+            }
+        }
+
+        // Mark history as sent
+        {
+            let mut lounge = state.lounge.lock();
+            if let Some(player) = lounge.players.get_mut(&player_id) {
+                player.history_sent = true;
+            }
+        }
+    } else {
+        eprintln!("[LOUNGE] Skipping history for {} (already sent)", name);
+    }
+
+    // Broadcast lounge update to all players
+    {
+        let lounge = state.lounge.lock();
+        let players: Vec<String> = lounge.players.values().map(|p| p.name.clone()).collect();
+        let available_hosts: Vec<(String, u16)> = lounge.players.values()
+            .filter_map(|p| p.hosting_port.map(|port| (p.name.clone(), port)))
+            .collect();
+        let update = ServerToClient::LoungeUpdate {
+            players: players.clone(),
+            available_hosts,
+        };
+
+        eprintln!("[LOUNGE] Broadcasting update to {} players: {:?}", lounge.players.len(), players);
+        for player in lounge.players.values() {
+            eprintln!("[LOUNGE] Sending LoungeUpdate to {} (id={})", player.name, player.id);
+            let _ = player.tx.send(update.clone());
+        }
+
+        eprintln!("[LOUNGE] {} joined, {} players total", name, lounge.players.len());
+    }
+}
+
+async fn handle_leave_lounge(state: AppState, player_id: Uuid) {
+    let mut lounge = state.lounge.lock();
+
+    let leaving_player_name = lounge.players.get(&player_id).map(|p| p.name.clone());
+
+    // Remove player
+    lounge.players.remove(&player_id);
+
+    // Broadcast lounge update to remaining players
+    let players: Vec<String> = lounge.players.values().map(|p| p.name.clone()).collect();
+    let available_hosts: Vec<(String, u16)> = lounge.players.values()
+        .filter_map(|p| p.hosting_port.map(|port| (p.name.clone(), port)))
+        .collect();
+    let update = ServerToClient::LoungeUpdate {
+        players: players.clone(),
+        available_hosts,
+    };
+
+    for player in lounge.players.values() {
+        let _ = player.tx.send(update.clone());
+    }
+
+    if let Some(name) = leaving_player_name {
+        eprintln!("[LOUNGE] {} left, {} players remaining", name, lounge.players.len());
+    }
+}
+
+async fn handle_volunteer_to_host(state: AppState, player_id: Uuid, port: u16) {
+    let mut lounge = state.lounge.lock();
+
+    if let Some(player) = lounge.players.get_mut(&player_id) {
+        player.hosting_port = Some(port);
+        eprintln!("[LOUNGE] {} volunteering to host on port {}", player.name, port);
+    }
+
+    // Broadcast updated host list to all players
+    let players: Vec<String> = lounge.players.values().map(|p| p.name.clone()).collect();
+    let available_hosts: Vec<(String, u16)> = lounge.players.values()
+        .filter_map(|p| p.hosting_port.map(|port| (p.name.clone(), port)))
+        .collect();
+    let update = ServerToClient::LoungeUpdate {
+        players,
+        available_hosts,
+    };
+
+    for player in lounge.players.values() {
+        let _ = player.tx.send(update.clone());
+    }
+}
+
+async fn handle_lounge_chat(state: AppState, player_id: Uuid, message: String) {
+    use chrono::Utc;
+
+    let player_name: String;
+    let timestamp = Utc::now().to_rfc3339();
+
+    {
+        let lounge = state.lounge.lock();
+        if let Some(player) = lounge.players.get(&player_id) {
+            player_name = player.name.clone();
+            let chat_msg = ServerToClient::ChatMessage {
+                player_name: player_name.clone(),
+                message: message.clone(),
+                scope: MessageScope::Group,
+                room: Some("lounge".to_string()),
+                timestamp: timestamp.clone(),
+                recipient: None,
+            };
+
+            // Broadcast to all lounge players
+            for (_, p) in lounge.players.iter() {
+                let _ = p.tx.send(chat_msg.clone());
+            }
+
+            eprintln!("[LOUNGE_CHAT] {}: {}", player_name, message);
+        } else {
+            return;
+        }
+    } // Release lock before async operation
+
+    // Store message to persistence
+    let stored_msg = StoredMessage {
+        player_name: player_name.clone(),
+        message: message.clone(),
+        scope: MessageScope::Group,
+        room: Some("lounge".to_string()),
+        timestamp,
+        recipient: None,
+    };
+
+    if let Err(e) = state.message_store.store_message(&stored_msg).await {
+        eprintln!("[LOUNGE_CHAT] Failed to store message: {}", e);
+    }
+}
+
