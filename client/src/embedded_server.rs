@@ -194,7 +194,7 @@ async fn handle_client_message(
 ) {
     match msg {
         ClientToServer::Join { room, name } => {
-            println!("[EMBEDDED] Player {} joining room '{}'", name, room);
+            println!("[EMBEDDED] Player {} (id={}) joining room '{}'", name, &player_id.to_string()[..8], room);
 
             // Update player info
             {
@@ -206,7 +206,7 @@ async fn handle_client_message(
             }
 
             // Create room if it doesn't exist, or join existing room
-            let (snapshot, seat) = {
+            let (snapshot, seat, should_broadcast) = {
                 let mut rooms = state.inner.lock();
                 let game_room = rooms.entry(room.clone()).or_insert_with(|| {
                     println!("[EMBEDDED] Creating new game room '{}'", room);
@@ -215,19 +215,42 @@ async fn handle_client_message(
                     new_room
                 });
 
-                // Add player to room
-                let seat = game_room.add_player(player_id, name.clone(), tx_out.clone());
-                println!("[EMBEDDED] Player {} added to room '{}' at seat {}", name, room, seat);
+                // Check if player is already in the room
+                let already_joined = game_room.players.iter().any(|p| p.id == player_id);
 
-                (game_room.public_snapshot(), seat)
+                if already_joined {
+                    println!("[EMBEDDED] Player {} already in room, skipping duplicate join", name);
+                    // Find their seat
+                    let seat = game_room.players.iter().position(|p| p.id == player_id).unwrap();
+                    (game_room.public_snapshot(), seat, false)
+                } else {
+                    // Add player to room
+                    let seat = game_room.add_player(player_id, name.clone(), tx_out.clone());
+                    println!("[EMBEDDED] Player {} added to room '{}' at seat {}", name, room, seat);
+                    (game_room.public_snapshot(), seat, true)
+                }
             };
 
-            // Send joined confirmation
+            // Send joined confirmation to this player
             let _ = tx_out.send(ServerToClient::Joined {
-                snapshot,
+                snapshot: snapshot.clone(),
                 your_seat: seat,
                 your_hand: PrivateHand { down_cards: vec![] },
             });
+
+            // Broadcast state update to all other players if this was a new join
+            if should_broadcast {
+                let rooms = state.inner.lock();
+                if let Some(game_room) = rooms.get(&room) {
+                    for (i, player) in game_room.players.iter().enumerate() {
+                        if player.id != player_id {
+                            let _ = player.tx.send(ServerToClient::UpdateState {
+                                snapshot: snapshot.clone(),
+                            });
+                        }
+                    }
+                }
+            }
 
             println!("[EMBEDDED] Player at seat {} joined successfully, phase: {:?}", seat, Phase::DealerSelection);
         }
