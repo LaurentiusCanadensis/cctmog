@@ -15,7 +15,7 @@ use std::{
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use cctmog_protocol::{ClientToServer, ServerToClient, Phase, PrivateHand};
+use cctmog_protocol::{ClientToServer, ServerToClient, Phase, PrivateHand, StoredMessage};
 
 // Re-use the game logic from the server
 use crate::game;
@@ -230,6 +230,55 @@ async fn handle_client_message(
             });
 
             println!("[EMBEDDED] Player at seat {} joined successfully, phase: {:?}", seat, Phase::DealerSelection);
+        }
+
+        ClientToServer::Chat { message, scope } => {
+            println!("[EMBEDDED] Chat message from player: {}", message);
+
+            // Get player info
+            let player_name = {
+                let players = state.players.lock();
+                players.get(&player_id)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_else(|| "Unknown".to_string())
+            };
+
+            let joined_room = {
+                let players = state.players.lock();
+                players.get(&player_id)
+                    .and_then(|p| p.joined_room.clone())
+            };
+
+            if let Some(room_name) = joined_room {
+                let mut rooms = state.inner.lock();
+                if let Some(game_room) = rooms.get_mut(&room_name) {
+                    // Store message in room
+                    use chrono::Utc;
+                    let stored_msg = StoredMessage {
+                        player_name: player_name.clone(),
+                        message: message.clone(),
+                        scope,
+                        room: Some(room_name.clone()),
+                        timestamp: Utc::now().to_rfc3339(),
+                        recipient: None,
+                    };
+                    game_room.chat_messages.push(stored_msg);
+
+                    // Broadcast to all players in the room
+                    let chat_msg = ServerToClient::ChatMessage {
+                        player_name,
+                        message,
+                        scope,
+                        room: Some(room_name),
+                        timestamp: Utc::now().to_rfc3339(),
+                        recipient: None,
+                    };
+
+                    for player in &game_room.players {
+                        let _ = player.tx.send(chat_msg.clone());
+                    }
+                }
+            }
         }
 
         ClientToServer::CreateTable { name, game_variant, ante, limit_small, limit_big, max_raises } => {

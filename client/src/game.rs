@@ -43,6 +43,9 @@ pub struct Room {
     // Dealer system tracking
     pub elected_players: Vec<Uuid>,
     pub current_dealer_id: Option<Uuid>,
+
+    // Game chat messages
+    pub chat_messages: Vec<StoredMessage>,
 }
 
 #[derive(Debug)]
@@ -96,6 +99,7 @@ impl Room {
             spectators: vec![],
             elected_players: vec![],
             current_dealer_id: None,
+            chat_messages: vec![],
         }
     }
 

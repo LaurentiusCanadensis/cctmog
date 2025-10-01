@@ -323,8 +323,149 @@ pub fn connect_overlay(url: &str, name: &str, room: &str) -> Element<'static, Ms
 }
 
 pub fn game_view(app: &App) -> Element<'_, Msg> {
-    let mut content = column![
-        Space::with_height(Length::Fixed(40.0)),
+    use iced_widget::{scrollable, text_input};
+
+    // Left panel: Game State Debug View
+    let game_state_text = if let Some(ref snapshot) = app.snapshot {
+        format!(
+            "GAME STATE\n\
+            ══════════════════════════════\n\
+            Room: {}\n\
+            Phase: {:?}\n\
+            Variant: {}\n\
+            ──────────────────────────────\n\
+            Players: {}\n\
+            Dealer Seat: {}\n\
+            To Act: {}\n\
+            ──────────────────────────────\n\
+            Pot: ${}\n\
+            Current Bet: ${}\n\
+            Raises: {}/{}\n\
+            Round: {}\n\
+            In Betting: {}\n\
+            ──────────────────────────────\n\
+            Ante: ${}\n\
+            Limits: ${} / ${}\n\
+            Community Cards: {}\n\
+            ──────────────────────────────\n\
+            Elected Players: {}\n\
+            Dealer ID: {:?}\n\
+            ══════════════════════════════",
+            snapshot.room,
+            snapshot.phase,
+            snapshot.game_variant,
+            snapshot.players.len(),
+            snapshot.dealer_seat,
+            snapshot.to_act_seat,
+            snapshot.pot,
+            snapshot.current_bet,
+            snapshot.raises_made,
+            snapshot.max_raises,
+            snapshot.round,
+            snapshot.in_betting,
+            snapshot.ante,
+            snapshot.limit_small,
+            snapshot.limit_big,
+            snapshot.community_cards.len(),
+            snapshot.elected_players.len(),
+            snapshot.current_dealer_id,
+        )
+    } else {
+        "No game state available".to_string()
+    };
+
+    let left_panel = container(
+        column![
+            // Game state section
+            container(
+                scrollable(
+                    text(game_state_text)
+                        .size(12)
+                        .font(iced::Font::MONOSPACE)
+                        .style(|_theme: &iced::Theme| iced_widget::text::Style {
+                            color: Some(iced::Color::from_rgb(0.8, 0.95, 0.8)),
+                            ..Default::default()
+                        })
+                )
+                .height(Length::Fixed(400.0))
+            )
+            .padding(10)
+            .style(|_theme: &iced::Theme| iced_widget::container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgb(0.05, 0.1, 0.05))),
+                border: iced::Border {
+                    color: iced::Color::from_rgb(0.2, 0.4, 0.2),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(8.0),
+                },
+                ..Default::default()
+            }),
+
+            Space::with_height(Length::Fixed(10.0)),
+
+            // Game chat section
+            container(
+                column![
+                    text("GAME CHAT")
+                        .size(14)
+                        .style(|_theme: &iced::Theme| iced_widget::text::Style {
+                            color: Some(iced::Color::from_rgb(0.95, 0.95, 0.8)),
+                            ..Default::default()
+                        }),
+                    Space::with_height(Length::Fixed(5.0)),
+                    scrollable(
+                        column(
+                            app.chat_messages
+                                .iter()
+                                .map(|(player_name, message, _scope, _timestamp)| {
+                                    container(
+                                        text(format!("{}: {}", player_name, message))
+                                            .size(11)
+                                            .style(|_theme: &iced::Theme| iced_widget::text::Style {
+                                                color: Some(iced::Color::from_rgb(0.9, 0.9, 0.9)),
+                                                ..Default::default()
+                                            })
+                                    )
+                                    .padding(4)
+                                    .into()
+                                })
+                                .collect::<Vec<_>>()
+                        )
+                        .spacing(2)
+                    )
+                    .height(Length::Fixed(200.0)),
+                    Space::with_height(Length::Fixed(5.0)),
+                    row![
+                        text_input("Type message...", &app.chat_input)
+                            .on_input(Msg::ChatInputChanged)
+                            .on_submit(Msg::SendChat)
+                            .padding(6)
+                            .size(12),
+                        Space::with_width(Length::Fixed(5.0)),
+                        button(text("Send").size(12))
+                            .on_press(Msg::SendChat)
+                            .padding(6),
+                    ]
+                ]
+            )
+            .padding(10)
+            .style(|_theme: &iced::Theme| iced_widget::container::Style {
+                background: Some(iced::Background::Color(iced::Color::from_rgb(0.08, 0.08, 0.12))),
+                border: iced::Border {
+                    color: iced::Color::from_rgb(0.3, 0.3, 0.4),
+                    width: 1.0,
+                    radius: iced::border::Radius::from(8.0),
+                },
+                ..Default::default()
+            }),
+        ]
+    )
+    .width(Length::Fixed(350.0))
+    .height(Length::Fill)
+    .padding(10);
+
+    // Main content area (right side)
+    let mut main_content = column![
+        Space::with_height(Length::Fixed(20.0)),
         text("Game Lobby").size(32)
             .style(|_theme: &iced::Theme| iced_widget::text::Style {
                 color: Some(iced::Color::from_rgb(0.92, 0.92, 0.94)),
@@ -355,7 +496,7 @@ pub fn game_view(app: &App) -> Element<'_, Msg> {
 
     // Add host controls if this user is the host
     if app.is_hosting {
-        content = content.push(
+        main_content = main_content.push(
             container(
                 column![
                     {
@@ -367,7 +508,7 @@ pub fn game_view(app: &App) -> Element<'_, Msg> {
                         text(title)
                             .size(20)
                             .style(|_theme: &iced::Theme| iced_widget::text::Style {
-                                color: Some(iced::Color::from_rgb(1.0, 0.84, 0.0)), // Gold color
+                                color: Some(iced::Color::from_rgb(1.0, 0.84, 0.0)),
                                 ..Default::default()
                             })
                     },
@@ -442,8 +583,7 @@ pub fn game_view(app: &App) -> Element<'_, Msg> {
             })
         );
     } else {
-        // Show waiting message for non-hosts
-        content = content.push(
+        main_content = main_content.push(
             container(
                 text("🎮 Waiting for host to start the game...")
                     .size(16)
@@ -465,11 +605,23 @@ pub fn game_view(app: &App) -> Element<'_, Msg> {
         );
     }
 
-    container(content)
+    // Combine left panel and main content
+    let layout = row![
+        left_panel,
+        container(main_content)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .center_x(Length::Fill)
+            .center_y(Length::Fill),
+    ];
+
+    container(layout)
         .width(Length::Fill)
         .height(Length::Fill)
-        .center_x(Length::Fill)
-        .center_y(Length::Fill)
+        .style(|_theme: &iced::Theme| iced_widget::container::Style {
+            background: Some(iced::Background::Color(iced::Color::from_rgb(0.10, 0.10, 0.12))),
+            ..Default::default()
+        })
         .into()
 }
 
