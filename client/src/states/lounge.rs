@@ -126,14 +126,18 @@ impl App {
                 )
             }
             Msg::SelectHost(player_name, port) => {
-                // Connect to the selected host's embedded server
-                self.host_name = Some(player_name.clone());
-                self.host_server_port = Some(*port);
-
-                // Set up connection to the host's server
-                self.url = format!("ws://127.0.0.1:{}/ws", port);
-                self.room = "game".to_string();  // Use a generic game room name
-
+                // Send selection to server - don't connect yet, wait for consensus
+                if let Some(ref tx) = self.tx_out {
+                    let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::SelectHost {
+                        host_name: player_name.clone(),
+                        port: *port,
+                    });
+                    self.log(format!("✅ Selected {} as host. Waiting for everyone to select...", player_name));
+                }
+                Task::none()
+            }
+            Msg::ConnectToOwnServer(port) => {
+                // Connect to our own embedded server after the delay
                 // Leave the lounge
                 if let Some(ref tx) = self.tx_out {
                     let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::LeaveLounge);
@@ -144,10 +148,27 @@ impl App {
                 self.app_state = crate::states::AppState::ConnectOverlay;
                 self.connecting = true;
                 self.connected = false;
-                self.tx_out = None;  // Reset connection to reconnect to new server
+                self.tx_out = None;  // Reset connection to reconnect to our own server
 
-                self.log(format!("🎮 Connecting to {}'s game server on port {}...", player_name, port));
+                self.log(format!("🎮 Connecting to your own game server on port {}...", port));
                 Task::none()
+            }
+            Msg::SelectPlayerToHost(player_name) => {
+                // A player name was clicked
+                if *player_name == self.name {
+                    // User clicked themselves - volunteer to host
+                    return self.handle_lounge_msg(&Msg::VolunteerToHost);
+                } else {
+                    // User clicked someone else - check if they're hosting
+                    if let Some((_, port)) = self.available_hosts.iter().find(|(name, _)| name == player_name) {
+                        // They're hosting - select them
+                        return self.handle_lounge_msg(&Msg::SelectHost(player_name.clone(), *port));
+                    } else {
+                        // They're not hosting - show error
+                        self.log(format!("⚠️ {} is not hosting. They must volunteer to host first.", player_name));
+                        Task::none()
+                    }
+                }
             }
             _ => Task::none(),
         }
@@ -312,22 +333,48 @@ impl App {
                     column(
                         self.lounge_players
                             .iter()
-                            .map(|player| {
-                                container(
-                                    text(player)
+                            .map(|player_name| {
+                                let is_you = player_name == &self.name;
+                                let is_hosting = self.available_hosts.iter().any(|(name, _)| name == player_name);
+
+                                let display_name = if is_you && is_hosting {
+                                    format!("🎯 {} (You - Hosting)", player_name)
+                                } else if is_you {
+                                    format!("{} (You)", player_name)
+                                } else if is_hosting {
+                                    format!("🎯 {} (Hosting)", player_name)
+                                } else {
+                                    player_name.clone()
+                                };
+
+                                button(
+                                    text(display_name)
                                         .size(18)
-                                        .style(|_theme: &iced::Theme| iced_widget::text::Style {
-                                            color: Some(iced::Color::from_rgb(0.12, 0.12, 0.12)), // #1e1e1e
-                                            ..Default::default()
-                                        })
                                 )
+                                .on_press(Msg::SelectPlayerToHost(player_name.clone()))
                                 .padding(12)
                                 .width(Length::Fixed(240.0))
-                                .style(|_theme: &iced::Theme| iced_widget::container::Style {
-                                    background: Some(iced::Background::Color(iced::Color::from_rgb(0.69, 0.54, 0.41))), // #b08968 - seat color
+                                .style(move |_theme: &iced::Theme, status| iced_widget::button::Style {
+                                    background: Some(iced::Background::Color(match status {
+                                        iced_widget::button::Status::Hovered if is_hosting => iced::Color::from_rgb(0.3, 0.7, 0.3),
+                                        iced_widget::button::Status::Hovered if is_you => iced::Color::from_rgb(0.79, 0.64, 0.51),
+                                        iced_widget::button::Status::Hovered => iced::Color::from_rgb(0.74, 0.59, 0.46),
+                                        _ if is_hosting => iced::Color::from_rgb(0.2, 0.6, 0.2),
+                                        _ if is_you => iced::Color::from_rgb(0.69, 0.54, 0.41), // #b08968 - seat color
+                                        _ => iced::Color::from_rgb(0.64, 0.49, 0.36),
+                                    })),
+                                    text_color: if is_hosting {
+                                        iced::Color::WHITE
+                                    } else {
+                                        iced::Color::from_rgb(0.12, 0.12, 0.12)
+                                    },
                                     border: iced::Border {
-                                        color: iced::Color::from_rgb(0.59, 0.44, 0.31),
-                                        width: 1.5,
+                                        color: if is_hosting {
+                                            iced::Color::from_rgb(0.3, 0.8, 0.3)
+                                        } else {
+                                            iced::Color::from_rgb(0.59, 0.44, 0.31)
+                                        },
+                                        width: if is_hosting { 2.5 } else { 1.5 },
                                         radius: iced::border::Radius::from(18.0),
                                     },
                                     ..Default::default()
@@ -340,169 +387,6 @@ impl App {
                 ]
             )
             .center_x(Length::Fill),
-
-            Space::with_height(Length::Fixed(40.0)),
-
-            // Host information display
-            if let Some(ref host_name) = self.host_name {
-                Element::from(
-                    container(
-                        text(format!("🎯 Host: {} (Port: {})", host_name, self.host_server_port.unwrap_or(0)))
-                            .size(16)
-                            .style(|_theme: &iced::Theme| iced_widget::text::Style {
-                                color: Some(iced::Color::from_rgb(0.4, 0.9, 0.4)),
-                                ..Default::default()
-                            })
-                    )
-                    .padding(10)
-                    .center_x(Length::Fill)
-                )
-            } else {
-                Element::from(
-                    container(
-                        text("No host discovered yet - click below to search")
-                            .size(14)
-                            .style(|_theme: &iced::Theme| iced_widget::text::Style {
-                                color: Some(iced::Color::from_rgb(0.6, 0.6, 0.6)),
-                                ..Default::default()
-                            })
-                    )
-                    .padding(8)
-                    .center_x(Length::Fill)
-                )
-            },
-
-            Space::with_height(Length::Fixed(20.0)),
-
-            // Host input field
-            container(
-                row![
-                    text_input("Enter host:port (e.g., localhost:9002)", &self.host_input)
-                        .on_input(Msg::HostInputChanged)
-                        .on_submit(Msg::ConnectToHost)
-                        .padding(10)
-                        .width(Length::Fixed(300.0))
-                        .style(|_theme: &iced::Theme, _status| iced_widget::text_input::Style {
-                            background: iced::Background::Color(iced::Color::from_rgb(0.2, 0.2, 0.22)),
-                            border: iced::Border {
-                                color: iced::Color::from_rgb(0.4, 0.5, 0.6),
-                                width: 2.0,
-                                radius: iced::border::Radius::from(8.0),
-                            },
-                            icon: iced::Color::from_rgb(0.9, 0.9, 0.9),
-                            placeholder: iced::Color::from_rgb(0.6, 0.6, 0.6),
-                            value: iced::Color::from_rgb(1.0, 1.0, 1.0),
-                            selection: iced::Color::from_rgb(0.3, 0.5, 0.7),
-                        }),
-                    Space::with_width(Length::Fixed(10.0)),
-                    button(text("Connect"))
-                        .on_press(Msg::ConnectToHost)
-                        .padding(10)
-                        .style(|_theme: &iced::Theme, status| iced_widget::button::Style {
-                            background: Some(iced::Background::Color(match status {
-                                iced_widget::button::Status::Hovered => iced::Color::from_rgb(0.3, 0.7, 0.3),
-                                _ => iced::Color::from_rgb(0.2, 0.6, 0.2),
-                            })),
-                            text_color: iced::Color::WHITE,
-                            border: iced::Border {
-                                color: iced::Color::from_rgb(0.3, 0.8, 0.3),
-                                width: 2.0,
-                                radius: iced::border::Radius::from(8.0),
-                            },
-                            ..Default::default()
-                        }),
-                ]
-                .align_y(Alignment::Center)
-            )
-            .center_x(Length::Fill),
-
-            Space::with_height(Length::Fixed(15.0)),
-
-            // Volunteer to Host button
-            container(
-                button(text("🎯 Volunteer to Host"))
-                    .on_press(Msg::VolunteerToHost)
-                    .padding(12)
-                    .width(Length::Fixed(200.0))
-                    .style(|_theme: &iced::Theme, status| iced_widget::button::Style {
-                        background: Some(iced::Background::Color(match status {
-                            iced_widget::button::Status::Hovered => iced::Color::from_rgb(0.5, 0.3, 0.7),
-                            _ => iced::Color::from_rgb(0.4, 0.2, 0.6),
-                        })),
-                        text_color: iced::Color::WHITE,
-                        border: iced::Border {
-                            color: iced::Color::from_rgb(0.6, 0.4, 0.8),
-                            width: 2.0,
-                            radius: iced::border::Radius::from(8.0),
-                        },
-                        ..Default::default()
-                    })
-            )
-            .center_x(Length::Fill),
-
-            Space::with_height(Length::Fixed(20.0)),
-
-            // Available hosts section
-            if !self.available_hosts.is_empty() {
-                Element::from(
-                    container(
-                        column![
-                            text("AVAILABLE HOSTS")
-                                .size(16)
-                                .style(|_theme: &iced::Theme| iced_widget::text::Style {
-                                    color: Some(iced::Color::from_rgb(0.84, 0.95, 0.95)),
-                                    ..Default::default()
-                                }),
-                            Space::with_height(Length::Fixed(10.0)),
-                            column(
-                                self.available_hosts
-                                    .iter()
-                                    .map(|(player_name, port)| {
-                                        let name = player_name.clone();
-                                        let p = *port;
-                                        button(
-                                            text(format!("{} (Port: {})", name, p))
-                                                .size(16)
-                                        )
-                                        .on_press(Msg::SelectHost(name.clone(), p))
-                                        .padding(10)
-                                        .width(Length::Fixed(220.0))
-                                        .style(|_theme: &iced::Theme, status| iced_widget::button::Style {
-                                            background: Some(iced::Background::Color(match status {
-                                                iced_widget::button::Status::Hovered => iced::Color::from_rgb(0.3, 0.7, 0.3),
-                                                _ => iced::Color::from_rgb(0.2, 0.6, 0.2),
-                                            })),
-                                            text_color: iced::Color::WHITE,
-                                            border: iced::Border {
-                                                color: iced::Color::from_rgb(0.3, 0.8, 0.3),
-                                                width: 2.0,
-                                                radius: iced::border::Radius::from(8.0),
-                                            },
-                                            ..Default::default()
-                                        })
-                                        .into()
-                                    })
-                                    .collect::<Vec<_>>()
-                            )
-                            .spacing(8),
-                        ]
-                    )
-                    .center_x(Length::Fill)
-                )
-            } else {
-                Element::from(
-                    container(
-                        text("No hosts available yet")
-                            .size(14)
-                            .style(|_theme: &iced::Theme| iced_widget::text::Style {
-                                color: Some(iced::Color::from_rgb(0.6, 0.6, 0.6)),
-                                ..Default::default()
-                            })
-                    )
-                    .padding(8)
-                    .center_x(Length::Fill)
-                )
-            },
         ]
         .align_x(Alignment::Center)
         .spacing(8)

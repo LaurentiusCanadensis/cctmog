@@ -90,7 +90,9 @@ pub enum Msg {
     HostInputChanged(String),
     ConnectToHost,
     VolunteerToHost,
+    SelectPlayerToHost(String), // Select a player from lounge to host
     SelectHost(String, u16), // (player_name, port)
+    ConnectToOwnServer(u16), // port
 
     // Host game controls
     StartGameNow,

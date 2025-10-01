@@ -419,6 +419,7 @@ pub enum ClientToServer {
     JoinLounge { name: String },
     LeaveLounge,
     VolunteerToHost { port: u16 },
+    SelectHost { host_name: String, port: u16 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -479,6 +480,13 @@ pub enum ServerToClient {
     LoungeUpdate {
         players: Vec<String>,
         available_hosts: Vec<(String, u16)>, // (player_name, port)
+        player_selections: Vec<(String, Option<String>)>, // (player_name, selected_host_name)
+    },
+
+    // Game start signal
+    StartGame {
+        host_name: String,
+        port: u16,
     },
 }
 

@@ -466,9 +466,10 @@ impl App {
                 ServerToClient::GameComment { comment } => {
                     self.game_comments.push(comment);
                 }
-                ServerToClient::LoungeUpdate { players, available_hosts } => {
+                ServerToClient::LoungeUpdate { players, available_hosts, player_selections } => {
                     println!("📫 Received LoungeUpdate with {} players: {:?}", players.len(), players);
                     println!("📫 Available hosts: {:?}", available_hosts);
+                    println!("📫 Player selections: {:?}", player_selections);
                     println!("📫 Current state: {:?}, transitioning to Lounge", self.app_state);
 
                     // Clear chat messages on first LoungeUpdate after joining (to prepare for history)
@@ -484,7 +485,34 @@ impl App {
                     self.connecting = false;
                     self.app_state = AppState::Lounge;
                     println!("📫 New state: {:?}, players: {:?}", self.app_state, self.lounge_players);
-                    self.log(format!("📫 Lounge update: {} players, {} hosts available", self.lounge_players.len(), self.available_hosts.len()));
+
+                    // Log player selections
+                    let selections_str: Vec<String> = player_selections.iter()
+                        .map(|(player, host)| format!("{}: {}", player, host.as_ref().map(|h| h.as_str()).unwrap_or("none")))
+                        .collect();
+                    self.log(format!("📫 Lounge update: {} players, {} hosts available | Selections: {}",
+                        self.lounge_players.len(), self.available_hosts.len(), selections_str.join(", ")));
+                }
+                ServerToClient::StartGame { host_name, port } => {
+                    self.log(format!("🎮 Consensus reached! Starting game with host {} on port {}", host_name, port));
+
+                    // Set up connection to the host's server
+                    self.host_name = Some(host_name.clone());
+                    self.host_server_port = Some(port);
+                    self.url = format!("ws://127.0.0.1:{}/ws", port);
+                    self.room = "game".to_string();
+
+                    // Leave the lounge
+                    if let Some(ref tx) = self.tx_out {
+                        let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::LeaveLounge);
+                    }
+                    self.in_lounge = false;
+
+                    // Transition to connecting state
+                    self.app_state = crate::states::AppState::ConnectOverlay;
+                    self.connecting = true;
+                    self.connected = false;
+                    self.tx_out = None;  // Reset connection to reconnect to game server
                 }
             },
 
@@ -725,9 +753,9 @@ impl App {
                 if self.in_lounge && self.is_hosting {
                     if let Some(ref tx) = self.tx_out {
                         let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::VolunteerToHost { port });
-                        self.log(format!("📡 Announced hosting on port {} to lounge", port));
+                        self.log(format!("📡 Announced hosting on port {} to lounge. Waiting for all players to select...", port));
                     }
-                    // Stay in lounge, don't transition
+                    // Don't auto-connect - wait for consensus
                     return Task::none();
                 }
 
@@ -891,7 +919,7 @@ impl App {
             }
 
             // Host selection messages
-            Msg::HostInputChanged(_) | Msg::ConnectToHost | Msg::VolunteerToHost | Msg::SelectHost(_, _) => {
+            Msg::HostInputChanged(_) | Msg::ConnectToHost | Msg::VolunteerToHost | Msg::SelectPlayerToHost(_) | Msg::SelectHost(_, _) | Msg::ConnectToOwnServer(_) => {
                 return self.handle_lounge_msg(&msg);
             }
         }

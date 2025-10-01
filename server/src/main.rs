@@ -40,6 +40,7 @@ struct LoungePlayer {
     tx: mpsc::UnboundedSender<ServerToClient>,
     history_sent: bool, // Track if we've already sent chat history to this player
     hosting_port: Option<u16>, // Port if volunteering to host
+    selected_host: Option<(String, u16)>, // (host_name, port) if player has selected a host
 }
 
 #[derive(Clone)]
@@ -555,6 +556,9 @@ async fn route_cmd(
         }
         ClientToServer::VolunteerToHost { port } => {
             handle_volunteer_to_host(state.clone(), my_id, port).await;
+        }
+        ClientToServer::SelectHost { host_name, port } => {
+            handle_select_host(state.clone(), my_id, host_name.clone(), port).await;
         }
     }
 }
@@ -1853,6 +1857,7 @@ async fn handle_join_lounge(state: AppState, player_id: Uuid, name: String, tx_o
                 tx: tx_out.clone(),
                 history_sent: false, // Will send history below
                 hosting_port: None,
+                selected_host: None,
             });
             send_history = true;
         }
@@ -1893,9 +1898,13 @@ async fn handle_join_lounge(state: AppState, player_id: Uuid, name: String, tx_o
         let available_hosts: Vec<(String, u16)> = lounge.players.values()
             .filter_map(|p| p.hosting_port.map(|port| (p.name.clone(), port)))
             .collect();
+        let player_selections: Vec<(String, Option<String>)> = lounge.players.values()
+            .map(|p| (p.name.clone(), p.selected_host.as_ref().map(|(name, _)| name.clone())))
+            .collect();
         let update = ServerToClient::LoungeUpdate {
             players: players.clone(),
             available_hosts,
+            player_selections,
         };
 
         eprintln!("[LOUNGE] Broadcasting update to {} players: {:?}", lounge.players.len(), players);
@@ -1921,9 +1930,13 @@ async fn handle_leave_lounge(state: AppState, player_id: Uuid) {
     let available_hosts: Vec<(String, u16)> = lounge.players.values()
         .filter_map(|p| p.hosting_port.map(|port| (p.name.clone(), port)))
         .collect();
+    let player_selections: Vec<(String, Option<String>)> = lounge.players.values()
+        .map(|p| (p.name.clone(), p.selected_host.as_ref().map(|(name, _)| name.clone())))
+        .collect();
     let update = ServerToClient::LoungeUpdate {
         players: players.clone(),
         available_hosts,
+        player_selections,
     };
 
     for player in lounge.players.values() {
@@ -1948,14 +1961,82 @@ async fn handle_volunteer_to_host(state: AppState, player_id: Uuid, port: u16) {
     let available_hosts: Vec<(String, u16)> = lounge.players.values()
         .filter_map(|p| p.hosting_port.map(|port| (p.name.clone(), port)))
         .collect();
+    let player_selections: Vec<(String, Option<String>)> = lounge.players.values()
+        .map(|p| (p.name.clone(), p.selected_host.as_ref().map(|(name, _)| name.clone())))
+        .collect();
     let update = ServerToClient::LoungeUpdate {
         players,
         available_hosts,
+        player_selections,
     };
 
     for player in lounge.players.values() {
         let _ = player.tx.send(update.clone());
     }
+}
+
+async fn handle_select_host(state: AppState, player_id: Uuid, host_name: String, port: u16) {
+    let mut lounge = state.lounge.lock();
+
+    if let Some(player) = lounge.players.get_mut(&player_id) {
+        player.selected_host = Some((host_name.clone(), port));
+        eprintln!("[LOUNGE] {} selected {} as host (port {})", player.name, host_name, port);
+    }
+
+    // Check if all players have selected the same host (consensus)
+    let all_selections: Vec<Option<(String, u16)>> = lounge.players.values()
+        .map(|p| p.selected_host.clone())
+        .collect();
+
+    let consensus = check_consensus(&all_selections);
+
+    // Broadcast updated selections to all players
+    let players: Vec<String> = lounge.players.values().map(|p| p.name.clone()).collect();
+    let available_hosts: Vec<(String, u16)> = lounge.players.values()
+        .filter_map(|p| p.hosting_port.map(|port| (p.name.clone(), port)))
+        .collect();
+    let player_selections: Vec<(String, Option<String>)> = lounge.players.values()
+        .map(|p| (p.name.clone(), p.selected_host.as_ref().map(|(name, _)| name.clone())))
+        .collect();
+    let update = ServerToClient::LoungeUpdate {
+        players,
+        available_hosts,
+        player_selections,
+    };
+
+    for player in lounge.players.values() {
+        let _ = player.tx.send(update.clone());
+    }
+
+    // If consensus reached, send StartGame to all players
+    if let Some((consensus_host, consensus_port)) = consensus {
+        eprintln!("[LOUNGE] Consensus reached! Everyone selected {} (port {})", consensus_host, consensus_port);
+        let start_game = ServerToClient::StartGame {
+            host_name: consensus_host,
+            port: consensus_port,
+        };
+        for player in lounge.players.values() {
+            let _ = player.tx.send(start_game.clone());
+        }
+    }
+}
+
+fn check_consensus(selections: &[Option<(String, u16)>]) -> Option<(String, u16)> {
+    // Return Some((host, port)) if all players have selected the same host and all have made a selection
+    if selections.is_empty() {
+        return None;
+    }
+
+    // Check if all selections are Some and equal
+    let first = selections.first()?.as_ref()?;
+    for selection in selections.iter() {
+        match selection {
+            Some(sel) if sel == first => continue,
+            _ => return None,
+        }
+    }
+
+    Some(first.clone())
 }
 
 async fn handle_lounge_chat(state: AppState, player_id: Uuid, message: String) {
