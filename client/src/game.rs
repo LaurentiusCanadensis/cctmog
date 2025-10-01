@@ -98,6 +98,65 @@ impl Room {
             current_dealer_id: None,
         }
     }
+
+    pub fn add_player(&mut self, id: Uuid, name: String, tx: tokio::sync::mpsc::UnboundedSender<ServerToClient>) -> usize {
+        let seat = self.players.len();
+        self.players.push(PlayerSeat {
+            id,
+            name,
+            chips: 1000,
+            folded: false,
+            standing: false,
+            up_cards: vec![],
+            down_cards: vec![],
+            ready: false,
+            committed_round: 0,
+            tx,
+        });
+        seat
+    }
+
+    pub fn public_snapshot(&self) -> PublicRoom {
+        PublicRoom {
+            room: self.name.clone(),
+            game_variant: self.game_variant,
+            dealer_seat: self.dealer_seat,
+            to_act_seat: self.to_act_seat,
+            pot: self.pot,
+            ante: self.ante,
+            phase: self.phase.clone(),
+            in_betting: self.in_betting,
+            current_bet: self.current_bet,
+            raises_made: self.raises_made,
+            max_raises: self.max_raises,
+            round: self.round,
+            limit_small: self.limit_small,
+            limit_big: self.limit_big,
+            community_cards: self.community_cards.clone(),
+            scheduled_start: self.scheduled_start.clone(),
+            checked_in_players: self.checked_in_players.clone(),
+            elected_players: self.elected_players.clone(),
+            current_dealer_id: self.current_dealer_id,
+            available_variants: vec![GameVariant::SevenTwentySeven, GameVariant::Omaha, GameVariant::TexasHoldem],
+            players: self
+                .players
+                .iter()
+                .enumerate()
+                .map(|(i, p)| PublicPlayer {
+                    id: p.id,
+                    name: p.name.clone(),
+                    seat: i,
+                    chips: p.chips,
+                    folded: p.folded,
+                    standing: p.standing,
+                    up_cards: p.up_cards.clone(),
+                    cards_count: p.up_cards.len() + p.down_cards.len(),
+                    committed_round: p.committed_round,
+                    ready: p.ready,
+                })
+                .collect(),
+        }
+    }
 }
 
 /// Helper functions for game logic

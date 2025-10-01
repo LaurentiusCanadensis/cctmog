@@ -126,10 +126,27 @@ impl App {
                 )
             }
             Msg::SelectHost(player_name, port) => {
-                // Set this player as the host
+                // Connect to the selected host's embedded server
                 self.host_name = Some(player_name.clone());
                 self.host_server_port = Some(*port);
-                self.log(format!("✓ Selected host: {} on port {}", player_name, port));
+
+                // Set up connection to the host's server
+                self.url = format!("ws://127.0.0.1:{}/ws", port);
+                self.room = "game".to_string();  // Use a generic game room name
+
+                // Leave the lounge
+                if let Some(ref tx) = self.tx_out {
+                    let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::LeaveLounge);
+                }
+                self.in_lounge = false;
+
+                // Transition to connecting state, then will go to dealer selection
+                self.app_state = crate::states::AppState::ConnectOverlay;
+                self.connecting = true;
+                self.connected = false;
+                self.tx_out = None;  // Reset connection to reconnect to new server
+
+                self.log(format!("🎮 Connecting to {}'s game server on port {}...", player_name, port));
                 Task::none()
             }
             _ => Task::none(),

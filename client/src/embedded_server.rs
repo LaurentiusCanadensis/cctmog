@@ -15,7 +15,7 @@ use std::{
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use cctmog_protocol::{ClientToServer, ServerToClient};
+use cctmog_protocol::{ClientToServer, ServerToClient, Phase, PrivateHand};
 
 // Re-use the game logic from the server
 use crate::game;
@@ -192,9 +192,46 @@ async fn handle_client_message(
     msg: ClientToServer,
     tx_out: &mpsc::UnboundedSender<ServerToClient>,
 ) {
-    // This will be similar to the main server's message handling
-    // For now, let's implement basic table creation
     match msg {
+        ClientToServer::Join { room, name } => {
+            println!("[EMBEDDED] Player {} joining room '{}'", name, room);
+
+            // Update player info
+            {
+                let mut players = state.players.lock();
+                if let Some(player) = players.get_mut(&player_id) {
+                    player.name = name.clone();
+                    player.joined_room = Some(room.clone());
+                }
+            }
+
+            // Create room if it doesn't exist, or join existing room
+            let (snapshot, seat) = {
+                let mut rooms = state.inner.lock();
+                let game_room = rooms.entry(room.clone()).or_insert_with(|| {
+                    println!("[EMBEDDED] Creating new game room '{}'", room);
+                    let mut new_room = game::Room::new(room.clone());
+                    new_room.phase = Phase::DealerSelection;  // Start at dealer selection
+                    new_room
+                });
+
+                // Add player to room
+                let seat = game_room.add_player(player_id, name.clone(), tx_out.clone());
+                println!("[EMBEDDED] Player {} added to room '{}' at seat {}", name, room, seat);
+
+                (game_room.public_snapshot(), seat)
+            };
+
+            // Send joined confirmation
+            let _ = tx_out.send(ServerToClient::Joined {
+                snapshot,
+                your_seat: seat,
+                your_hand: PrivateHand { down_cards: vec![] },
+            });
+
+            println!("[EMBEDDED] Player at seat {} joined successfully, phase: {:?}", seat, Phase::DealerSelection);
+        }
+
         ClientToServer::CreateTable { name, game_variant, ante, limit_small, limit_big, max_raises } => {
             let trimmed_name = name.trim();
             if trimmed_name.is_empty() {
