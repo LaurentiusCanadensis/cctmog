@@ -101,14 +101,29 @@ impl App {
                 Task::none()
             }
             Msg::VolunteerToHost => {
-                // Send message to server to volunteer as host
+                // Start embedded server and volunteer as host
                 // Using a default port of 9002 (can be made configurable later)
                 let port = 9002;
-                if let Some(ref tx) = self.tx_out {
-                    let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::VolunteerToHost { port });
-                    self.log(format!("🎯 Volunteering to host on port {}", port));
-                }
-                Task::none()
+                self.is_hosting = true;
+                self.host_server_port = Some(port);
+                self.log(format!("🎯 Starting embedded server on port {}...", port));
+
+                // Return a task to start the embedded server
+                Task::perform(
+                    async move {
+                        use tokio::net::TcpListener;
+                        // Check if port is available
+                        if TcpListener::bind(format!("127.0.0.1:{}", port)).await.is_ok() {
+                            Ok(port)
+                        } else {
+                            Err(format!("Port {} is already in use", port))
+                        }
+                    },
+                    |result| match result {
+                        Ok(port) => Msg::EmbeddedServerStarted(port),
+                        Err(err) => Msg::EmbeddedServerError(err),
+                    },
+                )
             }
             Msg::SelectHost(player_name, port) => {
                 // Set this player as the host

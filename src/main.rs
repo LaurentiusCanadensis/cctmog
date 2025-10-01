@@ -58,12 +58,12 @@ fn main() {
 }
 
 fn run_both(clients: u32, port: u16) {
-    println!("🚀 Starting CCTMOG Poker - Server + {} clients on port {}", clients, port);
+    println!("🚀 Starting CCTMOG Poker - Lounge server + {} clients on port {}", clients, port);
 
-    // Start server in background
-    println!("📡 Starting server on port {}...", port);
+    // Start lounge/discovery server in background on port 9001
+    println!("📡 Starting lounge server on port 9001...");
     let server_handle = thread::spawn(move || {
-        run_server(port);
+        run_server(9001);  // Always use 9001 for lounge server
     });
 
     // Wait a moment for server to start
@@ -80,7 +80,9 @@ fn run_both(clients: u32, port: u16) {
         client_handles.push(handle);
     }
 
-    println!("✅ All processes started. Press Ctrl+C to stop.");
+    println!("✅ All processes started.");
+    println!("💡 Note: Each client can volunteer to host games (embedded servers on port 9002+)");
+    println!("Press Ctrl+C to stop.");
 
     // Wait for all clients to finish (they won't unless killed)
     for handle in client_handles {

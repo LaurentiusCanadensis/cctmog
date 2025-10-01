@@ -719,10 +719,20 @@ impl App {
 
                 // Create a new server instance for storage (without the handle complexity)
                 self.embedded_server = Some(crate::embedded_server::EmbeddedServer::new(port));
-                self.log(format!("✅ Embedded server starting on port {}", port));
+                self.log(format!("✅ Embedded server started on port {}", port));
 
-                if self.is_hosting {
-                    // If hosting, set host info and go directly to dealer selection
+                // Announce hosting to the lounge server if we're in the lounge
+                if self.in_lounge && self.is_hosting {
+                    if let Some(ref tx) = self.tx_out {
+                        let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::VolunteerToHost { port });
+                        self.log(format!("📡 Announced hosting on port {} to lounge", port));
+                    }
+                    // Stay in lounge, don't transition
+                    return Task::none();
+                }
+
+                if self.is_hosting && !self.in_lounge {
+                    // If hosting outside lounge, set host info and go to dealer selection
                     self.host_name = Some(self.name.clone());
                     self.host_server_port = Some(port);
 
