@@ -89,6 +89,8 @@ pub struct App {
     pub in_lounge: bool,
     pub lounge_players: Vec<String>,
     pub available_hosts: Vec<(String, u16)>, // (player_name, port)
+    pub my_selected_host: Option<(String, u16)>, // (player_name, port) that I've selected
+    pub player_selections: Vec<(String, Option<String>)>, // (player_name, selected_host_name)
 
     // Username selection dropdown
     pub available_usernames: Vec<String>,
@@ -166,6 +168,8 @@ impl Default for App {
             in_lounge: false,
             lounge_players: Vec::new(),
             available_hosts: Vec::new(),
+            my_selected_host: None,
+            player_selections: Vec::new(),
 
             // Username selection fields
             available_usernames: available_usernames,
@@ -480,6 +484,7 @@ impl App {
 
                     self.lounge_players = players.clone();
                     self.available_hosts = available_hosts;
+                    self.player_selections = player_selections.clone();
                     self.in_lounge = true;
                     self.connected = true;
                     self.connecting = false;
@@ -507,6 +512,7 @@ impl App {
                         let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::LeaveLounge);
                     }
                     self.in_lounge = false;
+                    self.my_selected_host = None; // Clear selection when leaving lounge
 
                     // Transition to connecting state
                     self.app_state = crate::states::AppState::ConnectOverlay;

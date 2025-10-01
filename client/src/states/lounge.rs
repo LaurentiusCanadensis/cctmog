@@ -126,7 +126,23 @@ impl App {
                 )
             }
             Msg::SelectHost(player_name, port) => {
-                // Send selection to server - don't connect yet, wait for consensus
+                // Check if already selected - if so, deselect
+                if let Some((selected_name, selected_port)) = &self.my_selected_host {
+                    if selected_name == player_name && selected_port == port {
+                        // Already selected - deselect
+                        if let Some(ref tx) = self.tx_out {
+                            let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::SelectHost {
+                                host_name: String::new(), // Empty string = deselect
+                                port: 0,
+                            });
+                            self.log(format!("❌ Deselected {} as host", player_name));
+                        }
+                        self.my_selected_host = None;
+                        return Task::none();
+                    }
+                }
+
+                // Not selected or different selection - send selection to server
                 if let Some(ref tx) = self.tx_out {
                     let _ = tx.unbounded_send(cctmog_protocol::ClientToServer::SelectHost {
                         host_name: player_name.clone(),
@@ -134,6 +150,7 @@ impl App {
                     });
                     self.log(format!("✅ Selected {} as host. Waiting for everyone to select...", player_name));
                 }
+                self.my_selected_host = Some((player_name.clone(), *port));
                 Task::none()
             }
             Msg::ConnectToOwnServer(port) => {
@@ -155,19 +172,17 @@ impl App {
             }
             Msg::SelectPlayerToHost(player_name) => {
                 // A player name was clicked
-                if *player_name == self.name {
-                    // User clicked themselves - volunteer to host
+                // Check if this player is hosting
+                if let Some((_, port)) = self.available_hosts.iter().find(|(name, _)| name == player_name) {
+                    // They're hosting - select/deselect them
+                    return self.handle_lounge_msg(&Msg::SelectHost(player_name.clone(), *port));
+                } else if *player_name == self.name {
+                    // User clicked themselves and they're NOT hosting - volunteer to host
                     return self.handle_lounge_msg(&Msg::VolunteerToHost);
                 } else {
-                    // User clicked someone else - check if they're hosting
-                    if let Some((_, port)) = self.available_hosts.iter().find(|(name, _)| name == player_name) {
-                        // They're hosting - select them
-                        return self.handle_lounge_msg(&Msg::SelectHost(player_name.clone(), *port));
-                    } else {
-                        // They're not hosting - show error
-                        self.log(format!("⚠️ {} is not hosting. They must volunteer to host first.", player_name));
-                        Task::none()
-                    }
+                    // Clicked someone else who's not hosting - show error
+                    self.log(format!("⚠️ {} is not hosting. They must volunteer to host first.", player_name));
+                    Task::none()
                 }
             }
             _ => Task::none(),
@@ -336,15 +351,39 @@ impl App {
                             .map(|player_name| {
                                 let is_you = player_name == &self.name;
                                 let is_hosting = self.available_hosts.iter().any(|(name, _)| name == player_name);
+                                let is_selected = self.my_selected_host.as_ref()
+                                    .map(|(name, _)| name == player_name)
+                                    .unwrap_or(false);
 
-                                let display_name = if is_you && is_hosting {
+                                // Find what host this player selected
+                                let their_selection = self.player_selections.iter()
+                                    .find(|(name, _)| name == player_name)
+                                    .and_then(|(_, sel)| sel.as_ref());
+
+                                let display_name = if is_you && is_hosting && is_selected {
+                                    format!("✅ 🎯 {} (You - Hosting - Selected)", player_name)
+                                } else if is_you && is_hosting {
                                     format!("🎯 {} (You - Hosting)", player_name)
                                 } else if is_you {
-                                    format!("{} (You)", player_name)
+                                    if let Some(selected_host) = their_selection {
+                                        format!("{} (You) → {}", player_name, selected_host)
+                                    } else {
+                                        format!("{} (You)", player_name)
+                                    }
+                                } else if is_hosting && is_selected {
+                                    format!("✅ 🎯 {} (Hosting - Selected)", player_name)
                                 } else if is_hosting {
-                                    format!("🎯 {} (Hosting)", player_name)
+                                    if let Some(selected_host) = their_selection {
+                                        format!("🎯 {} (Hosting) → {}", player_name, selected_host)
+                                    } else {
+                                        format!("🎯 {} (Hosting)", player_name)
+                                    }
                                 } else {
-                                    player_name.clone()
+                                    if let Some(selected_host) = their_selection {
+                                        format!("{} → {}", player_name, selected_host)
+                                    } else {
+                                        player_name.clone()
+                                    }
                                 };
 
                                 button(
@@ -369,12 +408,14 @@ impl App {
                                         iced::Color::from_rgb(0.12, 0.12, 0.12)
                                     },
                                     border: iced::Border {
-                                        color: if is_hosting {
+                                        color: if is_selected {
+                                            iced::Color::from_rgb(1.0, 0.84, 0.0) // Gold border when selected
+                                        } else if is_hosting {
                                             iced::Color::from_rgb(0.3, 0.8, 0.3)
                                         } else {
                                             iced::Color::from_rgb(0.59, 0.44, 0.31)
                                         },
-                                        width: if is_hosting { 2.5 } else { 1.5 },
+                                        width: if is_selected { 3.5 } else if is_hosting { 2.5 } else { 1.5 },
                                         radius: iced::border::Radius::from(18.0),
                                     },
                                     ..Default::default()

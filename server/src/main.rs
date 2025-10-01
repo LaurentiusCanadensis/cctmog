@@ -1979,8 +1979,14 @@ async fn handle_select_host(state: AppState, player_id: Uuid, host_name: String,
     let mut lounge = state.lounge.lock();
 
     if let Some(player) = lounge.players.get_mut(&player_id) {
-        player.selected_host = Some((host_name.clone(), port));
-        eprintln!("[LOUNGE] {} selected {} as host (port {})", player.name, host_name, port);
+        if host_name.is_empty() {
+            // Empty host_name means deselect
+            player.selected_host = None;
+            eprintln!("[LOUNGE] {} deselected host", player.name);
+        } else {
+            player.selected_host = Some((host_name.clone(), port));
+            eprintln!("[LOUNGE] {} selected {} as host (port {})", player.name, host_name, port);
+        }
     }
 
     // Check if all players have selected the same host (consensus)
